@@ -1,0 +1,17 @@
+https://www.manageengine.com/network-monitoring/help/adding-devices-using-ssh.html
+
+# Generating the keys
+Install putty on your windows machine
+Once the installation is done, go to the directory in which putty was installed 
+and open the puttygen.bat file
+
+Click Generate. (It will generate public & Private key.
+Create a folder under windows user directory named SSH Key. 
+Save the Public key and private key under that folder. 
+(Do not close the puttygen window). Copy the public key displayed in PuttyGen window
+Open the private key file and save it as key.txt.This will be used by OpManager 
+to access the Linux system (Note: do not modify anything in it).
+
+# Adding the public key in the Linux Machine
+1.) Find the authorized_keys file in the file /etc/ssh/sshd_config
+2.) Paste the public key copied previously in the authorized keys file.
