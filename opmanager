@@ -1,0 +1,345 @@
+#!/bin/bash
+#=====================================================
+#  _                _     _
+# | |    ___   __ _(_)___| |_ _____  __
+# | |   / _ \ / _` | / __| __/ _ \ \/ /
+# | |__| (_) | (_| | \__ \ ||  __/>  <
+# |_____\___/ \__, |_|___/\__\___/_/\_\
+#             |___/
+#=====================================================
+#   ____       __  ___
+#  / __ \___  /  |/  /__ ____  ___ ____ ____ ____
+# / /_/ / _ \/ /|_/ / _ `/ _ \/ _ `/ _ `/ -_) __/
+# \____/ .__/_/  /_/\_,_/_//_/\_,_/\_, /\__/_/
+#     /_/                         /___/
+#=====================================================
+
+#################################
+#   configure snmp V3           #
+#   for OpManager               #
+#################################
+#   Logistex 06/2022
+#   Olly Keran
+
+#date in preferred format
+now=$(date +"%Y%m%d")
+
+## init config
+## currently set to my dir for testing 
+## chang to $HOME/support/OpManager/opmanager.conf, when use on live
+#backup_path="$HOME/support/OpManager"
+config_path=$(find /home -name *opmanager.conf*)
+source "$config_path"
+## add error handling > pass to gen new configfile
+
+# Color_Off='\033[0m'       # Text Reset
+# # Regular Colors
+# Black='\033[0;30m'        # Black
+# Red='\033[0;31m'          # Red
+# Green='\033[0;32m'        # Green
+# Yellow='\033[0;33m'       # Yellow
+# Blue='\033[0;34m'         # Blue
+# Purple='\033[0;35m'       # Purple
+# Cyan='\033[0;36m'         # Cyan
+# White='\033[0;37m'        # White
+
+## init logs
+#set -x
+init_logs() {
+    cd "$log_location" || return 1
+    touch "$now.log"
+    logfile="$now.log"
+    exec &> >(tee -a "$logfile")
+}
+
+show_config() {
+    cat $config_path
+}
+
+okmsg() {
+    echo ""
+    echo -e -n "\033[0;32m=> \033[0m"
+}
+
+errmsg() {
+    echo ""
+    echo -e -n "\033[0;31m=> \033[0m"
+}
+
+#TODO
+### needs alot of error checking
+check_config() {    
+    if [ -z "$localusername" ]; then
+        errmsg 
+        echo "Project Account Name: 👎"
+        echo "Please enter local username in configfile $config_path" 
+        else
+        okmsg
+        echo "Project Account Name: $localusername 👍"
+    fi 
+    if [ -z "$site" ]; then 
+        errmsg
+        echo "Name of Site: 👎"
+        echo "Please enter site in configfile $config_path"
+        else
+        okmsg
+        echo "Name of Site: $site 👍"
+    fi
+    if [ -z "$snmpusername" ]; then 
+        errmsg
+        echo "SNMPusername: 👎"
+        echo "Please enter snmpusername in configfile $config_path"
+        else
+        okmsg
+        echo "SNMPusername: $snmpusername 👍"
+    fi
+    if [ -z "$snmppassword" ]; then 
+        errmsg
+        echo "SNMPusername: 👎"
+        echo "Please enter snmppassword in configfile $config_path"
+        else
+        okmsg
+        echo "SNMPpassword: $snmppassword 👍"
+        echo ""
+    fi 
+
+    # make iterative?
+
+    # while read conf; do if [ -z conf ]; then echo "please complete config file Field: "$conf""; done < $config_path
+    #  local state="NOT-SET"
+    #     configs=("site" "localusername" "snmpusername" "snmppassword")
+    # while read conf; do
+    #         for str in ${configs[@]}; do 
+    #             if [ $str == conf ]; then 
+    #                 if [ -n conf ]; then
+    #                 state="SET" 
+    #         fi
+    #         done  
+            
+    #         echo $state 
+    #     done < "$config_path"
+}
+
+get_permissions() {
+    #check if run as root
+    if (( EUID != 0 )); then
+        errmsg
+        echo "Please run as root..."
+        exit 1
+    fi
+    return 0
+}
+
+if_empty() {
+    local files
+    files=$(ls -qAH -- /home/chair/.ssh)
+    if [ -z "$files" ]; then 
+        return 0
+    fi
+    return 1
+}
+
+Help() {
+    echo ""
+    echo -e "\033[0;32m  SNMP config for OpManager \033[0m"
+    echo ""
+    echo -e "  Syntax: $ snmp  \033[0;33m[-d|h|k|s]\033[0m"
+    echo ""
+    echo "  d         Do it"
+    echo "  h         Print this help page"
+    echo "  k         Generate new keys for site and add them to auth_keys"    
+    echo "  s         Run setup of chair user "
+    echo "  r         Remove chair user and snmp packages"
+    echo ""
+}
+
+gen_keys() {
+    if [ -d /home/chair/.ssh ]; then
+    # the directory exists
+        if [ if_empty == 0 ]; then
+        #check for presence of anything to prevent overwriting
+            if [[ -f "$site" ]]; then
+                errmsg
+                echo "Key-Pair already generated"        
+                else
+                #RSA 4096 no passphrase
+                ssh-keygen -t rsa -b 4096 -f /home/chair/.ssh/"$site" -P
+                okmsg
+                echo "Keys generated"
+                #copy backups to support
+                cp -pv "$site" $localusername/support/OpManager
+                cp -pv "$site".pub $localusername/support/OpManager
+                okmsg
+                echo "$site_$now key backed up to $localusername/support/OpManager"
+            fi
+            errmsg
+        fi  
+        errmsg
+    fi 
+}
+
+new_gen() {
+    #cd /home/chair/.ssh #|| errmsg && echo "/.ssh not accesible" && return 1
+    if [ -f "/home/chair/.ssh/$site" ]; then
+        errmsg
+        echo "SSH key already present not"
+        return 1
+    else
+        #RSA 4096 no passphrase
+        ssh-keygen -t rsa -b 4096 -f /home/chair/.ssh/"$site" -C "$site" -q -N "" && okmsg && echo "Keys generated"
+        #copy backups to support
+        cp -pv "$site" /home/$localusername/support/OpManager && cp -pv "$site".pub /home/$localusername/support/OpManager && okmsg && echo "$site_$now key backed up to $localusername/support/OpManager"   
+        return 0 
+    fi
+}
+
+apply_keys() {
+    if [[ -f "/home/chair/.ssh/$site" ]]; then
+        # append to authkeys
+        cat "/home/chair/.ssh/$site.pub" >> "/home/chair/.ssh/authorized_keys"
+        okmsg
+        echo "Public key added to /home/chair/.ssh/authorized_keys"
+    else
+        errmsg
+        echo "Public key not found"
+        return 1
+    fi
+    return 0
+}
+
+
+make_chair_user() {
+    #create user + pass + perms
+    useradd -m chair
+    echo -e "OpManager2022\nOpManager2022" | passwd chair
+    # TODO 
+    # change it to read in from the config file 
+    #chpasswd chair:OpManager2022
+    usermod -aG wheel chair
+    okmsg
+    echo "Chair user created"
+    #cd to user dir
+    #cd /home/chair || echo "directory not found" && return 1
+    #make .ssh with perms  
+}
+
+make_ssh() {
+    mkdir -pv /home/chair/.ssh
+    chmod 700 /home/chair/.ssh
+    okmsg
+    echo "/.ssh created"
+    #make authkeys + perms
+    touch /home/chair/.ssh/authorized_keys
+    chmod 600 /home/chair/.ssh/authorized_keys
+    okmsg
+    echo "auth_key file created"
+    chown chair:chair /home/chair/.ssh/authorized_keys
+    chown chair:chair /home/chair/.ssh
+    okmsg
+    echo "Permissions set"
+    #create backup with date 
+    cp /home/chair/.ssh/authorized_keys /home/chair/.ssh/authorized_keys"$now" 
+    chown chair:chair /home/chair/.ssh/authorized_keys"$now"
+    #check if
+}
+
+del_chair_user() {
+    #removes chair user and home directory
+    #only used for testing purposes
+    userdel --remove chair
+    okmsg
+    echo "Chair user removed"
+    return 0 
+}
+
+install_snmp() {
+    yum -q check-update
+    yum -y -q install net-snmp net-snmp-utils net-snmp-devel 
+    okmsg
+    echo "SNMP packages installed"
+    return 0 
+}
+
+remove_snmp() {
+    yum -y -q remove net-snmp net-snmp-utils net-snmp-devel 
+    okmsg
+    echo "SNMP packages removed"
+    return 0   
+}
+
+#TODO 
+#just copy over existing config file instead of editing 
+#may hav eto use the username and paswd from config 
+#copy file > find and replace with $s 
+#using easy to find pattern
+snmpv3_setup() {
+    systemctl stop snmpd
+    net-snmp-create-v3-user -ro -x AES -a SHA -A "$snmppassword" -X "$snmppassword" "$snmpusername"
+    echo "rouser $snmpusername AuthPriv" >> snmp.conf
+    okmsg
+    echo "SNMP v3 user created"
+    #look how to escape quotes
+    #echo "createUser "$snmpusername" SHA "$snmppassword" AES "$snmppassword"" >> /var/lib/net-snmp/snmpd.conf
+    # ## may need to be inserted into specific section
+    # echo 'rouser ChairHotline' >> /etc/snmp/snmpd.conf
+    # echo 'AuthPriv' >> /etc/snmp/snmpd.conf
+}
+
+sysd_conf() {
+    ## direct output to /dev/null to cleanup 
+    systemctl -q enable snmpd && systemctl -q start snmpd && systemctl -q status snmpd 
+    okmsg
+    echo "SNMP service enabled"
+}
+
+firewall_config() {
+    # check if firewall cmd is running first
+    if [ $(systemctl is-active --quiet firewalld) ]; then
+        firewall-cmd --zone=public --add-port=161/udp --permanent --quiet && firewall-cmd --zone=public --add-port=161/tcp --permanent --quiet && firewall-cmd --zone=public --add-port=162/udp --permanent --quiet && firewall-cmd --zone=public --add-port=162/tcp --permanent --quiet && firewall-cmd --reload --quiet
+        okmsg
+        echo "=> Ports 161, 162 rule created through firewalld"
+    fi
+    return 0 
+}
+
+test_walk() {
+    snmpwalk -v 3 -u "$snmpusername" -l AuthPriv -x AES -a SHA -X "$snmppassword" -A "$snmppassword" localhost .1.3.6.1.2.1.1 1> /dev/null && okmsg && echo 'SNMP-walk completed' 
+}
+
+while getopts "hdkrc" option; do
+    case "$option" in
+            k)
+                new_gen
+                apply_keys
+            ;;
+            d)
+                get_permissions
+                install_snmp
+                make_chair_user
+                make_ssh
+                snmpv3_setup
+                sysd_conf
+                firewall_config
+                test_walk
+            ;;
+            r)
+                remove_snmp
+                del_chair_user
+            ;;
+            h) # display Help
+                Help
+            exit;;
+            c) # display Help
+                check_config
+            exit;;
+            *)
+                echo "Invalid Option"
+                Help
+            exit;;   
+            ## show config option 
+            ## check config option 
+                ## add error handles
+            ## gennew config file option
+    esac
+done
+
