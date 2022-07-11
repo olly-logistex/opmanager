@@ -28,8 +28,6 @@ now=$(date +"%Y%m%d")
 ## currently set to my dir for testing 
 ## chang to $HOME/support/OpManager/opmanager.conf, when use on live
 #backup_path="$HOME/support/OpManager"
-config_path=$(find /home -name *opmanager.conf*)
-source "$config_path"
 ## add error handling > pass to gen new configfile
 
 # Color_Off='\033[0m'       # Text Reset
@@ -57,18 +55,22 @@ show_config() {
 }
 
 okmsg() {
-    echo ""
     echo -e -n "\033[0;32m=> \033[0m"
 }
 
 errmsg() {
-    echo ""
     echo -e -n "\033[0;31m=> \033[0m"
 }
 
 #TODO
 ### needs alot of error checking
-check_config() {    
+check_config() {   
+    local lu=false
+    local sitec=false
+    local uname=false
+    local pwd=false 
+    echo ""
+    echo "====================Config Check===================="
     if [ -z "$localusername" ]; then
         errmsg 
         echo "Project Account Name: 👎"
@@ -76,6 +78,7 @@ check_config() {
         else
         okmsg
         echo "Project Account Name: $localusername 👍"
+        lu=true
     fi 
     if [ -z "$site" ]; then 
         errmsg
@@ -84,6 +87,7 @@ check_config() {
         else
         okmsg
         echo "Name of Site: $site 👍"
+        sitec=true
     fi
     if [ -z "$snmpusername" ]; then 
         errmsg
@@ -92,6 +96,7 @@ check_config() {
         else
         okmsg
         echo "SNMPusername: $snmpusername 👍"
+        uname=true
     fi
     if [ -z "$snmppassword" ]; then 
         errmsg
@@ -101,8 +106,13 @@ check_config() {
         okmsg
         echo "SNMPpassword: $snmppassword 👍"
         echo ""
+        pwd=true
     fi 
-
+    if [[ $lu = true ]] && [[ $sitec = true ]] && [[ $uname = true ]] && [[ $pwd = true ]]; then 
+        return 0 
+        else 
+        return 1
+    fi 
     # make iterative?
 
     # while read conf; do if [ -z conf ]; then echo "please complete config file Field: "$conf""; done < $config_path
@@ -143,13 +153,14 @@ Help() {
     echo ""
     echo -e "\033[0;32m  SNMP config for OpManager \033[0m"
     echo ""
-    echo -e "  Syntax: $ snmp  \033[0;33m[-d|h|k|s]\033[0m"
+    echo -e "  Syntax: $ snmp  \033[0;33m[-d|h|k|q|c|r]\033[0m"
     echo ""
-    echo "  d         Do it"
-    echo "  h         Print this help page"
-    echo "  k         Generate new keys for site and add them to auth_keys"    
-    echo "  s         Run setup of chair user "
-    echo "  r         Remove chair user and snmp packages"
+    echo "  -d         Do it"
+    echo "  -h         Print this help page"
+    echo "  -k         Generate new keys for site and add them to auth_keys"    
+    echo "  -q         Quick check"
+    echo "  -c         Check with verbose(ish) output"
+    echo "  -r         Remove chair user and snmp packages"
     echo ""
 }
 
@@ -180,17 +191,22 @@ gen_keys() {
 
 new_gen() {
     #cd /home/chair/.ssh #|| errmsg && echo "/.ssh not accesible" && return 1
-    if [ -f "/home/chair/.ssh/$site" ]; then
+    if [ -d "/home/chair" ]; then
+        if [ -f "/home/chair/.ssh/$site" ]; then
+            errmsg
+            echo "SSH key already present not"
+            return 1
+        else
+            #RSA 4096 no passphrase
+            ssh-keygen -t rsa -b 4096 -f /home/chair/.ssh/"$site" -C "$site" -q -N "" && okmsg && echo "Keys generated"
+            #copy backups to support
+            cp -pv "$site" /home/$localusername/support/OpManager && cp -pv "$site".pub /home/$localusername/support/OpManager && okmsg && echo "$site_$now key backed up to $localusername/support/OpManager"   
+            return 0 
+        fi
+    else 
         errmsg
-        echo "SSH key already present not"
-        return 1
-    else
-        #RSA 4096 no passphrase
-        ssh-keygen -t rsa -b 4096 -f /home/chair/.ssh/"$site" -C "$site" -q -N "" && okmsg && echo "Keys generated"
-        #copy backups to support
-        cp -pv "$site" /home/$localusername/support/OpManager && cp -pv "$site".pub /home/$localusername/support/OpManager && okmsg && echo "$site_$now key backed up to $localusername/support/OpManager"   
-        return 0 
-    fi
+        echo 'Chair user not yet created, run -d to setup'
+    fi    
 }
 
 apply_keys() {
@@ -206,7 +222,6 @@ apply_keys() {
     fi
     return 0
 }
-
 
 make_chair_user() {
     #create user + pass + perms
@@ -224,23 +239,20 @@ make_chair_user() {
 }
 
 make_ssh() {
-    mkdir -pv /home/chair/.ssh
-    chmod 700 /home/chair/.ssh
-    okmsg
-    echo "/.ssh created"
+    mkdir -pv /home/chair/.ssh && okmsg && echo "/.ssh created"
+    chmod 700 /home/chair/.ssh && okmsg && echo "/.ssh permission set to 700"
     #make authkeys + perms
-    touch /home/chair/.ssh/authorized_keys
-    chmod 600 /home/chair/.ssh/authorized_keys
-    okmsg
-    echo "auth_key file created"
-    chown chair:chair /home/chair/.ssh/authorized_keys
-    chown chair:chair /home/chair/.ssh
-    okmsg
-    echo "Permissions set"
+    touch /home/chair/.ssh/authorized_keys && okmsg && echo "authorised_keys created"
+    chmod 600 /home/chair/.ssh/authorized_keys && okmsg && echo "authorized_keys permission set to 600"
+    chown chair:chair /home/chair/.ssh && okmsg && echo ".ssh ownership set to chair"
+    chown chair:chair /home/chair/.ssh/authorized_keys && okmsg && echo "authorised_keys ownership set to chair"
     #create backup with date 
+    if [ -s "/home/chair/.ssh/authorized_keys" ]; then
     cp /home/chair/.ssh/authorized_keys /home/chair/.ssh/authorized_keys"$now" 
     chown chair:chair /home/chair/.ssh/authorized_keys"$now"
-    #check if
+    okmsg 
+    echo "authorized_keys backed up"
+    fi
 }
 
 del_chair_user() {
@@ -265,6 +277,77 @@ remove_snmp() {
     okmsg
     echo "SNMP packages removed"
     return 0   
+}
+
+ssh_permission_check () {
+    local ssh=false
+    local auth=false
+    echo "====================SSH check===================="
+    if [ -d "/home/chair/.ssh" ]; then
+    okmsg
+    echo '.ssh exists'
+        if [[ $(stat -L -c "%a" /home/chair/.ssh) = 700 ]]; then 
+        okmsg
+        echo ".ssh permissions ok: $(stat -L -c "%a" /home/chair/.ssh)"
+        ssh=true
+        else    
+        errmsg
+        echo ".ssh has permissions $(stat -L -c "%a" /home/chair/.ssh), please run -d to fix"
+        fi 
+    else 
+    errmsg
+    echo ".ssh does not yet exist run with -d to setup"
+    fi
+
+    if [ -f "/home/chair/.ssh/authorized_keys" ]; then
+    okmsg
+    echo 'authorized_keys exists'
+        if [[ $(stat -L -c "%a" /home/chair/.ssh/authorized_keys) = 600 ]]; then 
+        okmsg
+        echo "authorized_keys permissions ok: $(stat -L -c "%a" /home/chair/.ssh/authorized_keys)"
+        auth=true
+        else    
+        errmsg
+        echo "authorized_keys has permissions $(stat -L -c "%a" /home/chair/.ssh/authorized_keys), please run -d to fix"
+        echo ""
+        fi 
+    else 
+    errmsg
+    echo "authorised_keys does not yet exist run with -d to setup"
+    echo ""
+    fi
+    if [[ $ssh = true ]] && [[ $auth = true ]]; then
+        return 0 
+        else 
+        return 1
+    fi
+}
+
+ssh_owner_check () {
+    local ssh=false
+    local auth=false
+    if [[ $(stat -c "%U" /home/chair/.ssh) = "chair" ]]; then 
+        okmsg
+        echo ".ssh ownership ok "
+        ssh=true
+        else
+        errmsg
+        echo ".ssh ownership set to $(stat -c "%U" /home/chair/.ssh)"
+    fi 
+    if [[ $(stat -c "%U" /home/chair/.ssh/authorized_keys) = "chair" ]]; then 
+        okmsg
+        echo "authorized_keys ownership ok "
+        auth=true
+        else
+        errmsg
+        echo "authorized_keys ownership set to $(stat -c "%U" /home/chair/.ssh/authorized_keys)"
+    fi 
+
+    if [[ $ssh = true ]] && [[ $auth = true ]]; then
+        return 0 
+        else 
+        return 1
+    fi
 }
 
 #TODO 
@@ -306,13 +389,20 @@ test_walk() {
     snmpwalk -v 3 -u "$snmpusername" -l AuthPriv -x AES -a SHA -X "$snmppassword" -A "$snmppassword" localhost .1.3.6.1.2.1.1 1> /dev/null && okmsg && echo 'SNMP-walk completed' 
 }
 
-while getopts "hdkrc" option; do
+get_permissions
+config_path=$(find /home -name *opmanager.conf*)
+source "$config_path"
+
+while getopts "hdkrcpqa" option; do
     case "$option" in
-            k)
-                new_gen
-                apply_keys
+            k) #keys
+                get_permissions
+                new_gen && apply_keys
             ;;
-            d)
+            a)
+            apply_keys
+            ;;
+            d) #do it
                 get_permissions
                 install_snmp
                 make_chair_user
@@ -322,17 +412,29 @@ while getopts "hdkrc" option; do
                 firewall_config
                 test_walk
             ;;
-            r)
+            r) #remove
                 remove_snmp
                 del_chair_user
             ;;
             h) # display Help
                 Help
             exit;;
-            c) # display Help
+            c) #check
                 check_config
+                ssh_permission_check
+                ssh_owner_check
             exit;;
-            *)
+            p) #permissions
+                make_ssh
+            ;;
+            q)
+                check_config 1>/dev/null && ssh_owner_check 1>/dev/null && ssh_permission_check 1>/dev/null && echo "checks: ok" || errmsg && echo -e "Checks: not ok"  "\nRun -c for verbose output"
+            ;;
+            :)
+            errmsg
+            echo 'please pass an option, see -h for details'
+            ;;
+            \? )
                 echo "Invalid Option"
                 Help
             exit;;   
@@ -343,3 +445,9 @@ while getopts "hdkrc" option; do
     esac
 done
 
+#TODO 
+#snmp conf file 
+#snmp conf file check
+#snmp walk settings 
+#snmpwalk options
+#handle stat errs
